@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   GraduationCap,
   Users,
@@ -458,16 +458,10 @@ function StudentExam({
   const [current, setCurrent] = useState("");
   const [seconds, setSeconds] = useState(session.timerMinutes * 60);
 
-  useMemo(() => {
-    // countdown handled via setInterval below; keep placeholder
-    return null;
-  }, []);
-
-  // simple countdown
-  useState(() => {
+  useEffect(() => {
     const iv = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(iv);
-  });
+  }, []);
 
   const total = session.questions.length;
   const isLast = index === total - 1;
