@@ -213,7 +213,7 @@ function TeacherDashboard({
         <div className="flex items-end justify-between">
           <div>
             <div className="text-xs font-medium uppercase tracking-widest text-primary">Educator workspace</div>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Welcome back, Prof. Sharma</h1>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Welcome back, Professor</h1>
             <p className="mt-1 text-sm text-muted-foreground">Design a viva, invite students, and let the AI examiner do the heavy lifting.</p>
           </div>
         </div>
