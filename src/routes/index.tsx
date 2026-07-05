@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { evaluateAnswer } from "@/lib/viva-ai.functions";
+import jsPDF from "jspdf";
 import {
   GraduationCap,
   Users,
@@ -22,6 +25,8 @@ import {
   Activity,
   TrendingUp,
   Play,
+  Loader2,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -350,6 +355,22 @@ function TeacherDashboard({
                     Reports <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
+                {s.reports.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {s.reports.map((r) => (
+                      <Button
+                        key={r.rollNumber}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => exportReportPdf(r)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        {r.studentName.split(" ")[0]} · PDF
+                      </Button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -357,6 +378,130 @@ function TeacherDashboard({
       </section>
     </div>
   );
+}
+
+function exportReportPdf(report: VivaReport) {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  let y = margin;
+
+  // Header band
+  doc.setFillColor(76, 55, 179);
+  doc.rect(0, 0, pageW, 110, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("AI VIVAEDGE · VIVA PERFORMANCE REPORT", margin, 44);
+  doc.setFontSize(20);
+  doc.text(report.studentName, margin, 72);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`${report.rollNumber}  ·  ${report.sessionTitle}`, margin, 92);
+  y = 150;
+
+  // Metrics row
+  doc.setTextColor(30, 30, 40);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  const metrics = [
+    ["Overall score", `${report.overallScore}%`],
+    ["Conceptual clarity", `${report.clarity}/100`],
+    ["Time elapsed", report.timeElapsed],
+  ];
+  const colW = (pageW - margin * 2) / 3;
+  metrics.forEach(([label, value], i) => {
+    const x = margin + colW * i;
+    doc.setDrawColor(220, 220, 230);
+    doc.roundedRect(x, y, colW - 12, 60, 6, 6, "S");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 130);
+    doc.text(label.toUpperCase(), x + 12, y + 20);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(30, 30, 40);
+    doc.text(value, x + 12, y + 46);
+  });
+  y += 90;
+
+  // Transcript
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Interactive Transcript", margin, y);
+  y += 20;
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  report.transcript.forEach((t, i) => {
+    ensureSpace(120);
+    doc.setDrawColor(230, 230, 238);
+    doc.setFillColor(248, 248, 252);
+    const startY = y;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(76, 55, 179);
+    doc.text(`Q${i + 1}.`, margin, y + 16);
+    doc.setTextColor(30, 30, 40);
+    const qLines = doc.splitTextToSize(t.question, pageW - margin * 2 - 60);
+    doc.text(qLines, margin + 28, y + 16);
+    // score chip
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(76, 55, 179);
+    doc.text(`${t.score}/100`, pageW - margin, y + 16, { align: "right" });
+    y += 16 + qLines.length * 14;
+
+    const addBlock = (label: string, body: string, color: [number, number, number]) => {
+      const lines = doc.splitTextToSize(body || "—", pageW - margin * 2 - 20);
+      ensureSpace(24 + lines.length * 12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(...color);
+      doc.text(label.toUpperCase(), margin + 10, y + 12);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(50, 50, 60);
+      doc.text(lines, margin + 10, y + 26);
+      y += 26 + lines.length * 12 + 4;
+    };
+
+    addBlock("Student response", t.studentResponse, [90, 90, 100]);
+    addBlock("AI probing follow-up", t.aiProbe, [76, 55, 179]);
+    if (t.strengths.length) addBlock("Strengths", "• " + t.strengths.join("\n• "), [40, 140, 80]);
+    if (t.weaknesses.length) addBlock("Gaps to address", "• " + t.weaknesses.join("\n• "), [200, 60, 60]);
+
+    // bounding rule
+    doc.setDrawColor(230, 230, 238);
+    doc.line(margin, y + 2, pageW - margin, y + 2);
+    y += 14;
+    void startY;
+  });
+
+  // Footer
+  const total = doc.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 160);
+    doc.text(
+      `AI VivaEdge · Generated ${new Date().toLocaleDateString()} · Page ${p} of ${total}`,
+      pageW / 2,
+      pageH - 20,
+      { align: "center" },
+    );
+  }
+
+  const safe = `${report.studentName}-${report.sessionTitle}`.replace(/[^a-z0-9]+/gi, "-");
+  doc.save(`viva-report-${safe}.pdf`);
 }
 
 /* ---------------- Student Setup ---------------- */
@@ -455,28 +600,80 @@ function StudentExam({
 }) {
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
+  const [questions, setQuestions] = useState<string[]>(session.questions);
+  const [evaluations, setEvaluations] = useState<
+    { score: number; clarity: number; strengths: string[]; weaknesses: string[]; aiProbe: string; feedback: string }[]
+  >([]);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [lastFeedback, setLastFeedback] = useState<string | null>(null);
   const [current, setCurrent] = useState("");
   const [seconds, setSeconds] = useState(session.timerMinutes * 60);
+  const evaluateFn = useServerFn(evaluateAnswer);
 
   useEffect(() => {
     const iv = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(iv);
   }, []);
 
-  const total = session.questions.length;
-  const isLast = index === total - 1;
+  const total = Math.max(session.questionCount, questions.length);
+  const isLast = index >= total - 1;
   const progress = ((index + 1) / total) * 100;
+  const lowTime = seconds <= 60;
 
-  const submit = () => {
-    const nextAnswers = [...answers, current];
+  const submit = async () => {
+    const answer = current;
+    const nextAnswers = [...answers, answer];
     setAnswers(nextAnswers);
     setCurrent("");
-    if (isLast) {
-      const report = buildReport(session, student, nextAnswers, session.timerMinutes * 60 - seconds);
-      onFinish(report);
-      return;
+    setIsEvaluating(true);
+    setLastFeedback(null);
+    try {
+      const evalResult = await evaluateFn({
+        data: {
+          level: session.level,
+          sessionTitle: session.title,
+          syllabusContext: session.syllabusContext,
+          question: questions[index],
+          studentAnswer: answer,
+          isLast,
+        },
+      });
+      const nextEvals = [...evaluations, {
+        score: evalResult.score,
+        clarity: evalResult.clarity,
+        strengths: evalResult.strengths,
+        weaknesses: evalResult.weaknesses,
+        aiProbe: evalResult.aiProbe,
+        feedback: evalResult.feedback,
+      }];
+      setEvaluations(nextEvals);
+      setLastFeedback(evalResult.feedback);
+
+      if (isLast) {
+        const report = buildLiveReport(
+          session,
+          student,
+          questions,
+          nextAnswers,
+          nextEvals,
+          session.timerMinutes * 60 - seconds,
+        );
+        onFinish(report);
+        return;
+      }
+
+      // Append AI-generated follow-up as next question
+      if (evalResult.followUpQuestion && evalResult.followUpQuestion.trim()) {
+        setQuestions((qs) => {
+          const nq = [...qs];
+          if (nq[index + 1] === undefined) nq[index + 1] = evalResult.followUpQuestion;
+          return nq;
+        });
+      }
+      setIndex((i) => i + 1);
+    } finally {
+      setIsEvaluating(false);
     }
-    setIndex((i) => i + 1);
   };
 
   const simulateMic = () => {
@@ -496,8 +693,15 @@ function StudentExam({
             <span className="text-primary">Question {index + 1}</span>
             <span className="text-muted-foreground">of {total}</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1 font-mono text-xs">
-            <Clock className="h-3.5 w-3.5 text-primary" /> {mm}:{ss}
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-full px-4 py-1.5 font-mono text-sm font-semibold shadow-elegant transition-colors",
+              lowTime
+                ? "bg-destructive text-destructive-foreground animate-pulse"
+                : "gradient-primary text-primary-foreground",
+            )}
+          >
+            <Clock className="h-4 w-4" /> {mm}:{ss}
           </div>
         </div>
         <Progress value={progress} className="h-1.5" />
@@ -509,11 +713,11 @@ function StudentExam({
 
       {/* AI Examiner card */}
       <Card key={index} className="animate-slide-up overflow-hidden">
-        <div className="gradient-primary p-6">
-          <div className="flex items-center gap-3">
-            <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-white/15 backdrop-blur">
-              <Brain className="h-5 w-5 text-primary-foreground" />
-              <span className="absolute inset-0 rounded-xl border-2 border-white/40 animate-pulse-ring" />
+        <div className="gradient-primary p-10">
+          <div className="flex items-center gap-4">
+            <div className="relative grid h-14 w-14 place-items-center rounded-2xl bg-white/15 backdrop-blur">
+              <Brain className="h-7 w-7 text-primary-foreground" />
+              <span className="absolute inset-0 rounded-2xl border-2 border-white/40 animate-pulse-ring" />
             </div>
             <div className="text-primary-foreground">
               <div className="text-xs font-medium uppercase tracking-widest opacity-80">AI Examiner</div>
@@ -523,40 +727,93 @@ function StudentExam({
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" style={{ animationDelay: "150ms" }} />
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" style={{ animationDelay: "300ms" }} />
                 </span>
-                Listening & probing
+                {isEvaluating ? "Evaluating your answer…" : "Listening & probing"}
               </div>
             </div>
           </div>
-          <p className="mt-5 text-lg font-medium leading-relaxed text-primary-foreground">
-            {session.questions[index]}
+          <p className="mt-8 text-2xl font-medium leading-relaxed text-primary-foreground">
+            {questions[index] ?? "Preparing next question…"}
           </p>
         </div>
 
-        <div className="space-y-4 p-6">
+        <div className="space-y-5 p-10">
+          {lastFeedback && (
+            <div className="rounded-xl border border-success/40 bg-success/10 p-4 text-sm text-foreground/85">
+              <span className="font-semibold text-[color:var(--success)]">AI feedback · </span>
+              {lastFeedback}
+            </div>
+          )}
           <Label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
             Your response
           </Label>
           <Textarea
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
-            rows={6}
-            className="resize-none text-base"
+            rows={7}
+            disabled={isEvaluating}
+            className="resize-none p-5 text-base leading-relaxed"
             placeholder="Type your answer, or use the mic button to simulate speech-to-text…"
           />
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button variant="outline" onClick={simulateMic} className="gap-2">
+            <Button variant="outline" onClick={simulateMic} disabled={isEvaluating} className="gap-2">
               <Mic className="h-4 w-4 text-primary" />
               Simulate mic (speech-to-text)
             </Button>
-            <Button onClick={submit} disabled={!current.trim()} size="lg" className="gap-2">
-              {isLast ? "Finalize & submit viva" : "Submit answer & continue"}
-              <ChevronRight className="h-4 w-4" />
+            <Button onClick={submit} disabled={!current.trim() || isEvaluating} size="lg" className="gap-2">
+              {isEvaluating ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> AI grading…</>
+              ) : (
+                <>
+                  {isLast ? "Finalize & submit viva" : "Submit answer & continue"}
+                  <ChevronRight className="h-4 w-4" />
+                </>
+              )}
             </Button>
           </div>
         </div>
       </Card>
     </div>
   );
+}
+
+function buildLiveReport(
+  session: Session,
+  student: { name: string; roll: string },
+  questions: string[],
+  answers: string[],
+  evaluations: {
+    score: number;
+    clarity: number;
+    strengths: string[];
+    weaknesses: string[];
+    aiProbe: string;
+  }[],
+  elapsed: number,
+): VivaReport {
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  const overall = evaluations.length
+    ? Math.round(evaluations.reduce((a, e) => a + e.score, 0) / evaluations.length)
+    : 0;
+  const clarity = evaluations.length
+    ? Math.round(evaluations.reduce((a, e) => a + e.clarity, 0) / evaluations.length)
+    : 0;
+  return {
+    studentName: student.name,
+    rollNumber: student.roll,
+    sessionTitle: session.title,
+    overallScore: overall,
+    clarity,
+    timeElapsed: `${mm}:${ss}`,
+    transcript: questions.map((q, i) => ({
+      question: q,
+      studentResponse: answers[i] || "—",
+      aiProbe: evaluations[i]?.aiProbe ?? "Can you elaborate further?",
+      strengths: evaluations[i]?.strengths ?? [],
+      weaknesses: evaluations[i]?.weaknesses ?? [],
+      score: evaluations[i]?.score ?? 0,
+    })),
+  };
 }
 
 function buildReport(
@@ -617,9 +874,14 @@ function ReportView({ report, onBack }: { report: VivaReport; onBack: () => void
         <Button variant="ghost" onClick={onBack} className="gap-2">
           <ArrowLeft className="h-4 w-4" /> Back to dashboard
         </Button>
-        <Button variant="outline" onClick={() => window.print()} className="gap-2">
-          <Printer className="h-4 w-4" /> Print certificate
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => window.print()} className="gap-2">
+            <Printer className="h-4 w-4" /> Print
+          </Button>
+          <Button onClick={() => exportReportPdf(report)} className="gap-2">
+            <Download className="h-4 w-4" /> Download PDF
+          </Button>
+        </div>
       </div>
 
       {/* Scorecard */}
