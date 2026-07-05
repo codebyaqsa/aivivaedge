@@ -460,28 +460,80 @@ function StudentExam({
 }) {
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
+  const [questions, setQuestions] = useState<string[]>(session.questions);
+  const [evaluations, setEvaluations] = useState<
+    { score: number; clarity: number; strengths: string[]; weaknesses: string[]; aiProbe: string; feedback: string }[]
+  >([]);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [lastFeedback, setLastFeedback] = useState<string | null>(null);
   const [current, setCurrent] = useState("");
   const [seconds, setSeconds] = useState(session.timerMinutes * 60);
+  const evaluateFn = useServerFn(evaluateAnswer);
 
   useEffect(() => {
     const iv = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(iv);
   }, []);
 
-  const total = session.questions.length;
-  const isLast = index === total - 1;
+  const total = Math.max(session.questionCount, questions.length);
+  const isLast = index >= total - 1;
   const progress = ((index + 1) / total) * 100;
+  const lowTime = seconds <= 60;
 
-  const submit = () => {
-    const nextAnswers = [...answers, current];
+  const submit = async () => {
+    const answer = current;
+    const nextAnswers = [...answers, answer];
     setAnswers(nextAnswers);
     setCurrent("");
-    if (isLast) {
-      const report = buildReport(session, student, nextAnswers, session.timerMinutes * 60 - seconds);
-      onFinish(report);
-      return;
+    setIsEvaluating(true);
+    setLastFeedback(null);
+    try {
+      const evalResult = await evaluateFn({
+        data: {
+          level: session.level,
+          sessionTitle: session.title,
+          syllabusContext: session.syllabusContext,
+          question: questions[index],
+          studentAnswer: answer,
+          isLast,
+        },
+      });
+      const nextEvals = [...evaluations, {
+        score: evalResult.score,
+        clarity: evalResult.clarity,
+        strengths: evalResult.strengths,
+        weaknesses: evalResult.weaknesses,
+        aiProbe: evalResult.aiProbe,
+        feedback: evalResult.feedback,
+      }];
+      setEvaluations(nextEvals);
+      setLastFeedback(evalResult.feedback);
+
+      if (isLast) {
+        const report = buildLiveReport(
+          session,
+          student,
+          questions,
+          nextAnswers,
+          nextEvals,
+          session.timerMinutes * 60 - seconds,
+        );
+        onFinish(report);
+        return;
+      }
+
+      // Append AI-generated follow-up as next question
+      if (evalResult.followUpQuestion && evalResult.followUpQuestion.trim()) {
+        setQuestions((qs) => {
+          const nq = [...qs];
+          if (nq[index + 1] === undefined) nq[index + 1] = evalResult.followUpQuestion;
+          return nq;
+        });
+      }
+      setIndex((i) => i + 1);
+    } finally {
+      setIsEvaluating(false);
     }
-    setIndex((i) => i + 1);
   };
 
   const simulateMic = () => {
@@ -501,8 +553,15 @@ function StudentExam({
             <span className="text-primary">Question {index + 1}</span>
             <span className="text-muted-foreground">of {total}</span>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1 font-mono text-xs">
-            <Clock className="h-3.5 w-3.5 text-primary" /> {mm}:{ss}
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-full px-4 py-1.5 font-mono text-sm font-semibold shadow-elegant transition-colors",
+              lowTime
+                ? "bg-destructive text-destructive-foreground animate-pulse"
+                : "gradient-primary text-primary-foreground",
+            )}
+          >
+            <Clock className="h-4 w-4" /> {mm}:{ss}
           </div>
         </div>
         <Progress value={progress} className="h-1.5" />
@@ -514,11 +573,11 @@ function StudentExam({
 
       {/* AI Examiner card */}
       <Card key={index} className="animate-slide-up overflow-hidden">
-        <div className="gradient-primary p-6">
-          <div className="flex items-center gap-3">
-            <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-white/15 backdrop-blur">
-              <Brain className="h-5 w-5 text-primary-foreground" />
-              <span className="absolute inset-0 rounded-xl border-2 border-white/40 animate-pulse-ring" />
+        <div className="gradient-primary p-10">
+          <div className="flex items-center gap-4">
+            <div className="relative grid h-14 w-14 place-items-center rounded-2xl bg-white/15 backdrop-blur">
+              <Brain className="h-7 w-7 text-primary-foreground" />
+              <span className="absolute inset-0 rounded-2xl border-2 border-white/40 animate-pulse-ring" />
             </div>
             <div className="text-primary-foreground">
               <div className="text-xs font-medium uppercase tracking-widest opacity-80">AI Examiner</div>
@@ -528,40 +587,93 @@ function StudentExam({
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" style={{ animationDelay: "150ms" }} />
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" style={{ animationDelay: "300ms" }} />
                 </span>
-                Listening & probing
+                {isEvaluating ? "Evaluating your answer…" : "Listening & probing"}
               </div>
             </div>
           </div>
-          <p className="mt-5 text-lg font-medium leading-relaxed text-primary-foreground">
-            {session.questions[index]}
+          <p className="mt-8 text-2xl font-medium leading-relaxed text-primary-foreground">
+            {questions[index] ?? "Preparing next question…"}
           </p>
         </div>
 
-        <div className="space-y-4 p-6">
+        <div className="space-y-5 p-10">
+          {lastFeedback && (
+            <div className="rounded-xl border border-success/40 bg-success/10 p-4 text-sm text-foreground/85">
+              <span className="font-semibold text-[color:var(--success)]">AI feedback · </span>
+              {lastFeedback}
+            </div>
+          )}
           <Label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
             Your response
           </Label>
           <Textarea
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
-            rows={6}
-            className="resize-none text-base"
+            rows={7}
+            disabled={isEvaluating}
+            className="resize-none p-5 text-base leading-relaxed"
             placeholder="Type your answer, or use the mic button to simulate speech-to-text…"
           />
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button variant="outline" onClick={simulateMic} className="gap-2">
+            <Button variant="outline" onClick={simulateMic} disabled={isEvaluating} className="gap-2">
               <Mic className="h-4 w-4 text-primary" />
               Simulate mic (speech-to-text)
             </Button>
-            <Button onClick={submit} disabled={!current.trim()} size="lg" className="gap-2">
-              {isLast ? "Finalize & submit viva" : "Submit answer & continue"}
-              <ChevronRight className="h-4 w-4" />
+            <Button onClick={submit} disabled={!current.trim() || isEvaluating} size="lg" className="gap-2">
+              {isEvaluating ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> AI grading…</>
+              ) : (
+                <>
+                  {isLast ? "Finalize & submit viva" : "Submit answer & continue"}
+                  <ChevronRight className="h-4 w-4" />
+                </>
+              )}
             </Button>
           </div>
         </div>
       </Card>
     </div>
   );
+}
+
+function buildLiveReport(
+  session: Session,
+  student: { name: string; roll: string },
+  questions: string[],
+  answers: string[],
+  evaluations: {
+    score: number;
+    clarity: number;
+    strengths: string[];
+    weaknesses: string[];
+    aiProbe: string;
+  }[],
+  elapsed: number,
+): VivaReport {
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  const overall = evaluations.length
+    ? Math.round(evaluations.reduce((a, e) => a + e.score, 0) / evaluations.length)
+    : 0;
+  const clarity = evaluations.length
+    ? Math.round(evaluations.reduce((a, e) => a + e.clarity, 0) / evaluations.length)
+    : 0;
+  return {
+    studentName: student.name,
+    rollNumber: student.roll,
+    sessionTitle: session.title,
+    overallScore: overall,
+    clarity,
+    timeElapsed: `${mm}:${ss}`,
+    transcript: questions.map((q, i) => ({
+      question: q,
+      studentResponse: answers[i] || "—",
+      aiProbe: evaluations[i]?.aiProbe ?? "Can you elaborate further?",
+      strengths: evaluations[i]?.strengths ?? [],
+      weaknesses: evaluations[i]?.weaknesses ?? [],
+      score: evaluations[i]?.score ?? 0,
+    })),
+  };
 }
 
 function buildReport(
