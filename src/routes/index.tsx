@@ -874,9 +874,14 @@ function ReportView({ report, onBack }: { report: VivaReport; onBack: () => void
         <Button variant="ghost" onClick={onBack} className="gap-2">
           <ArrowLeft className="h-4 w-4" /> Back to dashboard
         </Button>
-        <Button variant="outline" onClick={() => window.print()} className="gap-2">
-          <Printer className="h-4 w-4" /> Print certificate
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => window.print()} className="gap-2">
+            <Printer className="h-4 w-4" /> Print
+          </Button>
+          <Button onClick={() => exportReportPdf(report)} className="gap-2">
+            <Download className="h-4 w-4" /> Download PDF
+          </Button>
+        </div>
       </div>
 
       {/* Scorecard */}
