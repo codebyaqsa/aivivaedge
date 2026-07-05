@@ -355,6 +355,24 @@ function TeacherDashboard({
                     Reports <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
+                {s.reports.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {s.reports.map((r) => (
+                      <Button
+                        key={r.rollNumber}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => exportReportPdf(r)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        {r.studentName.split(" ")[0]} · PDF
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                <div className="hidden">
+                </div>
               </div>
             ))}
           </div>
