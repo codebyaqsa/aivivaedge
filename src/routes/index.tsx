@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { evaluateAnswer } from "@/lib/viva-ai.functions";
+import jsPDF from "jspdf";
 import {
   GraduationCap,
   Users,
@@ -22,6 +25,8 @@ import {
   Activity,
   TrendingUp,
   Play,
+  Loader2,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
