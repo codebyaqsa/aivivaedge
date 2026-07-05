@@ -794,21 +794,38 @@ function buildLiveReport(
   questions: string[],
   answers: string[],
   evaluations: {
-    score: number;
-    clarity: number;
+    scoreOutOfTen: number;
+    conceptualClarity: string;
     strengths: string[];
     weaknesses: string[];
-    aiProbe: string;
+    followUp: string;
   }[],
   elapsed: number,
 ): VivaReport {
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
   const overall = evaluations.length
-    ? Math.round(evaluations.reduce((a, e) => a + e.score, 0) / evaluations.length)
+    ? Math.round(
+        (evaluations.reduce((a, e) => a + e.scoreOutOfTen, 0) / evaluations.length) * 10,
+      )
     : 0;
+  // Map qualitative clarity ratings to a 0-100 scale for the report card.
+  const clarityMap: Record<string, number> = {
+    excellent: 95,
+    strong: 88,
+    solid: 80,
+    good: 78,
+    "needs work": 62,
+    weak: 45,
+    poor: 30,
+  };
   const clarity = evaluations.length
-    ? Math.round(evaluations.reduce((a, e) => a + e.clarity, 0) / evaluations.length)
+    ? Math.round(
+        evaluations.reduce(
+          (a, e) => a + (clarityMap[e.conceptualClarity.trim().toLowerCase()] ?? 70),
+          0,
+        ) / evaluations.length,
+      )
     : 0;
   return {
     studentName: student.name,
@@ -820,10 +837,10 @@ function buildLiveReport(
     transcript: questions.map((q, i) => ({
       question: q,
       studentResponse: answers[i] || "—",
-      aiProbe: evaluations[i]?.aiProbe ?? "Can you elaborate further?",
+      aiProbe: evaluations[i]?.followUp || "Session complete — no further follow-up.",
       strengths: evaluations[i]?.strengths ?? [],
       weaknesses: evaluations[i]?.weaknesses ?? [],
-      score: evaluations[i]?.score ?? 0,
+      score: Math.round((evaluations[i]?.scoreOutOfTen ?? 0) * 10),
     })),
   };
 }
