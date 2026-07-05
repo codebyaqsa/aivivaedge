@@ -602,7 +602,13 @@ function StudentExam({
   const [answers, setAnswers] = useState<string[]>([]);
   const [questions, setQuestions] = useState<string[]>(session.questions);
   const [evaluations, setEvaluations] = useState<
-    { score: number; clarity: number; strengths: string[]; weaknesses: string[]; aiProbe: string; feedback: string }[]
+    {
+      scoreOutOfTen: number;
+      conceptualClarity: string;
+      strengths: string[];
+      weaknesses: string[];
+      followUp: string;
+    }[]
   >([]);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [lastFeedback, setLastFeedback] = useState<string | null>(null);
@@ -638,18 +644,23 @@ function StudentExam({
           isLast,
         },
       });
-      const nextEvals = [...evaluations, {
-        score: evalResult.score,
-        clarity: evalResult.clarity,
-        strengths: evalResult.strengths,
-        weaknesses: evalResult.weaknesses,
-        aiProbe: evalResult.aiProbe,
-        feedback: evalResult.feedback,
-      }];
+      const evalPart = evalResult.currentQuestionEvaluation;
+      const nextEvals = [
+        ...evaluations,
+        {
+          scoreOutOfTen: evalPart.scoreOutOfTen,
+          conceptualClarity: evalPart.conceptualClarity,
+          strengths: evalPart.strengths,
+          weaknesses: evalPart.weaknesses,
+          followUp: evalResult.nextQuestionText,
+        },
+      ];
       setEvaluations(nextEvals);
-      setLastFeedback(evalResult.feedback);
+      setLastFeedback(
+        `Clarity: ${evalPart.conceptualClarity} · Scored ${evalPart.scoreOutOfTen}/10`,
+      );
 
-      if (isLast) {
+      if (evalResult.isFinalQuestion || isLast) {
         const report = buildLiveReport(
           session,
           student,
@@ -662,11 +673,12 @@ function StudentExam({
         return;
       }
 
-      // Append AI-generated follow-up as next question
-      if (evalResult.followUpQuestion && evalResult.followUpQuestion.trim()) {
+      // Smoothly swap in the AI-generated follow-up as the next question
+      const followUp = evalResult.nextQuestionText?.trim();
+      if (followUp) {
         setQuestions((qs) => {
           const nq = [...qs];
-          if (nq[index + 1] === undefined) nq[index + 1] = evalResult.followUpQuestion;
+          nq[index + 1] = followUp;
           return nq;
         });
       }
@@ -782,21 +794,38 @@ function buildLiveReport(
   questions: string[],
   answers: string[],
   evaluations: {
-    score: number;
-    clarity: number;
+    scoreOutOfTen: number;
+    conceptualClarity: string;
     strengths: string[];
     weaknesses: string[];
-    aiProbe: string;
+    followUp: string;
   }[],
   elapsed: number,
 ): VivaReport {
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
   const overall = evaluations.length
-    ? Math.round(evaluations.reduce((a, e) => a + e.score, 0) / evaluations.length)
+    ? Math.round(
+        (evaluations.reduce((a, e) => a + e.scoreOutOfTen, 0) / evaluations.length) * 10,
+      )
     : 0;
+  // Map qualitative clarity ratings to a 0-100 scale for the report card.
+  const clarityMap: Record<string, number> = {
+    excellent: 95,
+    strong: 88,
+    solid: 80,
+    good: 78,
+    "needs work": 62,
+    weak: 45,
+    poor: 30,
+  };
   const clarity = evaluations.length
-    ? Math.round(evaluations.reduce((a, e) => a + e.clarity, 0) / evaluations.length)
+    ? Math.round(
+        evaluations.reduce(
+          (a, e) => a + (clarityMap[e.conceptualClarity.trim().toLowerCase()] ?? 70),
+          0,
+        ) / evaluations.length,
+      )
     : 0;
   return {
     studentName: student.name,
@@ -808,10 +837,10 @@ function buildLiveReport(
     transcript: questions.map((q, i) => ({
       question: q,
       studentResponse: answers[i] || "—",
-      aiProbe: evaluations[i]?.aiProbe ?? "Can you elaborate further?",
+      aiProbe: evaluations[i]?.followUp || "Session complete — no further follow-up.",
       strengths: evaluations[i]?.strengths ?? [],
       weaknesses: evaluations[i]?.weaknesses ?? [],
-      score: evaluations[i]?.score ?? 0,
+      score: Math.round((evaluations[i]?.scoreOutOfTen ?? 0) * 10),
     })),
   };
 }

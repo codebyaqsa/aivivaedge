@@ -13,14 +13,17 @@ const EvaluateInput = z.object({
 });
 
 const EvaluateSchema = z.object({
-  score: z.number(),
-  clarity: z.number(),
-  strengths: z.array(z.string()),
-  weaknesses: z.array(z.string()),
-  aiProbe: z.string(),
-  followUpQuestion: z.string(),
-  feedback: z.string(),
+  isFinalQuestion: z.boolean(),
+  nextQuestionText: z.string(),
+  currentQuestionEvaluation: z.object({
+    scoreOutOfTen: z.number(),
+    conceptualClarity: z.string(),
+    strengths: z.array(z.string()),
+    weaknesses: z.array(z.string()),
+  }),
 });
+
+export type EvaluationResult = z.infer<typeof EvaluateSchema>;
 
 export const evaluateAnswer = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => EvaluateInput.parse(data))
@@ -31,35 +34,42 @@ export const evaluateAnswer = createServerFn({ method: "POST" })
     const gateway = createLovableAiGatewayProvider(key);
     const model = gateway("google/gemini-3-flash-preview");
 
-    const prompt = `You are an AI oral examiner (viva). Evaluate the student's spoken response using the syllabus context as ground truth. Adapt vocabulary and rigor to the academic level.
+    const system = [
+      "You are the AI engine behind AI VivaEdge. Your task is to evaluate the student's answer based strictly on the provided Academic Level, the Subject, and the 'Syllabus Context' supplied by the teacher.",
+      "If the student's answer is partially correct or lacks detail, formulate a highly specific, conversational follow-up question that pushes them to expand on the missing concepts.",
+      "If it is the final question of the session, do not ask a follow-up. Instead, calculate a final grade and output the transcript analysis.",
+      "Always respond as pure JSON matching the required schema. Adapt vocabulary and probing depth to the academic level.",
+    ].join(" ");
 
-ACADEMIC LEVEL: ${data.level}
-VIVA TOPIC: ${data.sessionTitle}
+    const prompt = `ACADEMIC LEVEL: ${data.level}
+SUBJECT / TOPIC: ${data.sessionTitle}
+IS THIS THE FINAL QUESTION OF THE SESSION? ${data.isLast ? "YES" : "NO"}
 
-SYLLABUS CONTEXT (ground truth):
+SYLLABUS CONTEXT (ground truth — grade strictly against this):
 """
 ${data.syllabusContext}
 """
 
-CURRENT QUESTION: ${data.question}
+CURRENT QUESTION:
+${data.question}
 
 STUDENT'S ANSWER:
 """
 ${data.studentAnswer}
 """
 
-Return a JSON object with:
-- score: integer 0-100 for this specific answer
-- clarity: integer 0-100 for verbal clarity/structure
-- strengths: 1-3 short bullet strings
-- weaknesses: 1-3 short bullet strings (empty array if none)
-- aiProbe: one probing follow-up asking the student to elaborate or justify
-- followUpQuestion: ${data.isLast ? "an empty string (this was the last question)" : "the NEXT question, dynamically generated from gaps in the student's answer and remaining syllabus scope. It should feel like a natural next step, not a repeat."}
-- feedback: one-sentence encouraging summary suitable for the student.`;
+Return JSON with:
+- isFinalQuestion: ${data.isLast ? "true" : "false"} (must match the flag above)
+- nextQuestionText: ${data.isLast ? "an empty string (this was the final question)" : "a specific, conversational follow-up question targeting the gaps in the student's answer relative to the syllabus context"}
+- currentQuestionEvaluation.scoreOutOfTen: number 0-10 for this answer
+- currentQuestionEvaluation.conceptualClarity: short qualitative rating (e.g. "Excellent", "Solid", "Needs Work", "Weak")
+- currentQuestionEvaluation.strengths: 1-3 short bullet strings
+- currentQuestionEvaluation.weaknesses: 1-3 short bullet strings citing specific syllabus concepts the student missed (empty array if truly none)`;
 
     try {
       const { output } = await generateText({
         model,
+        system,
         output: Output.object({ schema: EvaluateSchema }),
         prompt,
       });
@@ -67,13 +77,16 @@ Return a JSON object with:
     } catch (err) {
       // Graceful fallback so the UI never crashes
       return {
-        score: 70,
-        clarity: 72,
-        strengths: ["Attempted the concept"],
-        weaknesses: ["AI evaluation temporarily unavailable"],
-        aiProbe: "Can you elaborate with a specific example?",
-        followUpQuestion: data.isLast ? "" : "Could you connect this idea to a real-world scenario?",
-        feedback: "Response recorded. Live AI grading is temporarily unavailable.",
-      };
+        isFinalQuestion: data.isLast,
+        nextQuestionText: data.isLast
+          ? ""
+          : "Could you connect this idea to a real-world scenario and walk me through your reasoning?",
+        currentQuestionEvaluation: {
+          scoreOutOfTen: 7,
+          conceptualClarity: "Needs Work",
+          strengths: ["Attempted the concept"],
+          weaknesses: ["AI evaluation temporarily unavailable — please retry"],
+        },
+      } satisfies EvaluationResult;
     }
   });
