@@ -602,7 +602,13 @@ function StudentExam({
   const [answers, setAnswers] = useState<string[]>([]);
   const [questions, setQuestions] = useState<string[]>(session.questions);
   const [evaluations, setEvaluations] = useState<
-    { score: number; clarity: number; strengths: string[]; weaknesses: string[]; aiProbe: string; feedback: string }[]
+    {
+      scoreOutOfTen: number;
+      conceptualClarity: string;
+      strengths: string[];
+      weaknesses: string[];
+      followUp: string;
+    }[]
   >([]);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [lastFeedback, setLastFeedback] = useState<string | null>(null);
@@ -638,18 +644,23 @@ function StudentExam({
           isLast,
         },
       });
-      const nextEvals = [...evaluations, {
-        score: evalResult.score,
-        clarity: evalResult.clarity,
-        strengths: evalResult.strengths,
-        weaknesses: evalResult.weaknesses,
-        aiProbe: evalResult.aiProbe,
-        feedback: evalResult.feedback,
-      }];
+      const evalPart = evalResult.currentQuestionEvaluation;
+      const nextEvals = [
+        ...evaluations,
+        {
+          scoreOutOfTen: evalPart.scoreOutOfTen,
+          conceptualClarity: evalPart.conceptualClarity,
+          strengths: evalPart.strengths,
+          weaknesses: evalPart.weaknesses,
+          followUp: evalResult.nextQuestionText,
+        },
+      ];
       setEvaluations(nextEvals);
-      setLastFeedback(evalResult.feedback);
+      setLastFeedback(
+        `Clarity: ${evalPart.conceptualClarity} · Scored ${evalPart.scoreOutOfTen}/10`,
+      );
 
-      if (isLast) {
+      if (evalResult.isFinalQuestion || isLast) {
         const report = buildLiveReport(
           session,
           student,
@@ -662,11 +673,12 @@ function StudentExam({
         return;
       }
 
-      // Append AI-generated follow-up as next question
-      if (evalResult.followUpQuestion && evalResult.followUpQuestion.trim()) {
+      // Smoothly swap in the AI-generated follow-up as the next question
+      const followUp = evalResult.nextQuestionText?.trim();
+      if (followUp) {
         setQuestions((qs) => {
           const nq = [...qs];
-          if (nq[index + 1] === undefined) nq[index + 1] = evalResult.followUpQuestion;
+          nq[index + 1] = followUp;
           return nq;
         });
       }
