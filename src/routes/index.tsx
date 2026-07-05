@@ -371,8 +371,6 @@ function TeacherDashboard({
                     ))}
                   </div>
                 )}
-                <div className="hidden">
-                </div>
               </div>
             ))}
           </div>
@@ -380,6 +378,130 @@ function TeacherDashboard({
       </section>
     </div>
   );
+}
+
+function exportReportPdf(report: VivaReport) {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  let y = margin;
+
+  // Header band
+  doc.setFillColor(76, 55, 179);
+  doc.rect(0, 0, pageW, 110, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("AI VIVAEDGE · VIVA PERFORMANCE REPORT", margin, 44);
+  doc.setFontSize(20);
+  doc.text(report.studentName, margin, 72);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`${report.rollNumber}  ·  ${report.sessionTitle}`, margin, 92);
+  y = 150;
+
+  // Metrics row
+  doc.setTextColor(30, 30, 40);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  const metrics = [
+    ["Overall score", `${report.overallScore}%`],
+    ["Conceptual clarity", `${report.clarity}/100`],
+    ["Time elapsed", report.timeElapsed],
+  ];
+  const colW = (pageW - margin * 2) / 3;
+  metrics.forEach(([label, value], i) => {
+    const x = margin + colW * i;
+    doc.setDrawColor(220, 220, 230);
+    doc.roundedRect(x, y, colW - 12, 60, 6, 6, "S");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 130);
+    doc.text(label.toUpperCase(), x + 12, y + 20);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(30, 30, 40);
+    doc.text(value, x + 12, y + 46);
+  });
+  y += 90;
+
+  // Transcript
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Interactive Transcript", margin, y);
+  y += 20;
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  report.transcript.forEach((t, i) => {
+    ensureSpace(120);
+    doc.setDrawColor(230, 230, 238);
+    doc.setFillColor(248, 248, 252);
+    const startY = y;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(76, 55, 179);
+    doc.text(`Q${i + 1}.`, margin, y + 16);
+    doc.setTextColor(30, 30, 40);
+    const qLines = doc.splitTextToSize(t.question, pageW - margin * 2 - 60);
+    doc.text(qLines, margin + 28, y + 16);
+    // score chip
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(76, 55, 179);
+    doc.text(`${t.score}/100`, pageW - margin, y + 16, { align: "right" });
+    y += 16 + qLines.length * 14;
+
+    const addBlock = (label: string, body: string, color: [number, number, number]) => {
+      const lines = doc.splitTextToSize(body || "—", pageW - margin * 2 - 20);
+      ensureSpace(24 + lines.length * 12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(...color);
+      doc.text(label.toUpperCase(), margin + 10, y + 12);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(50, 50, 60);
+      doc.text(lines, margin + 10, y + 26);
+      y += 26 + lines.length * 12 + 4;
+    };
+
+    addBlock("Student response", t.studentResponse, [90, 90, 100]);
+    addBlock("AI probing follow-up", t.aiProbe, [76, 55, 179]);
+    if (t.strengths.length) addBlock("Strengths", "• " + t.strengths.join("\n• "), [40, 140, 80]);
+    if (t.weaknesses.length) addBlock("Gaps to address", "• " + t.weaknesses.join("\n• "), [200, 60, 60]);
+
+    // bounding rule
+    doc.setDrawColor(230, 230, 238);
+    doc.line(margin, y + 2, pageW - margin, y + 2);
+    y += 14;
+    void startY;
+  });
+
+  // Footer
+  const total = doc.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 160);
+    doc.text(
+      `AI VivaEdge · Generated ${new Date().toLocaleDateString()} · Page ${p} of ${total}`,
+      pageW / 2,
+      pageH - 20,
+      { align: "center" },
+    );
+  }
+
+  const safe = `${report.studentName}-${report.sessionTitle}`.replace(/[^a-z0-9]+/gi, "-");
+  doc.save(`viva-report-${safe}.pdf`);
 }
 
 /* ---------------- Student Setup ---------------- */
